@@ -1,5 +1,31 @@
-# oracle-kubernetes-engine
-The demo of how to create Virtual Cloud Network and Kubernetes Cluster in Oracle Kubernetes Engine (OKE) with OCI Go SDK
+## Author
+[Azhary Arliansyah](https://github.com/azhry)
+
+## Table of Contents
+- [VCN Rough Sketch](#vcn-rough-sketch)
+- [Cluster Specs](#cluster-specs)
+- [Node Pool Specs](#node-pool-specs)
+- [VCN Specs](#vcn-specs)
+- [VCN Components](#vcn-components)
+- [Steps](#steps)
+	* [Create Virtual Cloud Network](#1-create-virtual-cloud-network) 
+	* [Create Internet Gateway](#2-create-internet-gateway)
+	* [Create NAT Gateway](#3-create-nat-gateway)
+	* [Create Service Gateway](#4-create-service-gateway)
+	* [Create Private Route Table](#5-create-private-route-table)
+	* [Create Public Route Table](#6-create-public-route-table)
+	* [Create K8s Security List](#7-create-k8s-security-list)
+	* [Create Node Security List](#8-create-node-security-list)
+	* [Create Subnets](#9-create-subnets)
+	* [Create Cluster](#10-create-cluster)
+	* [Migrate to VCN-Native Cluster](#11-migrate-to-vcn-native-cluster)
+	* [Create Node Pool](#12-create-node-pool)
+
+
+## VCN Rough Sketch
+![vcn-sketch](https://user-images.githubusercontent.com/9222583/183304079-74e87c7f-09c0-4a57-95d0-83d419e600e0.png)
+
+
 
 ## Cluster Specs
 <ul>
@@ -7,7 +33,15 @@ The demo of how to create Virtual Cloud Network and Kubernetes Cluster in Oracle
   <li>Assign Public IP: true</li>
   <li>Service LB Subnet: svc-subnet</li>
   <li>VCN: OCI-GOSDK-Az-VCN</li>
+  <li>Node Count: 3 Nodes</li>
 </ul>
+
+
+## Node Pool Specs
+- Node Count: 3
+- Kubernetes Version: v1.22.5
+- Shape: VM.Standard.E3.Flex
+- OCPUs: 4
 
 
 ## VCN Specs
@@ -22,16 +56,16 @@ The demo of how to create Virtual Cloud Network and Kubernetes Cluster in Oracle
 
 | Label | Type  | Specs  |
 | ------- | --- | --- |
-| internetgateway | Internet Gateway | ?? |
-| natgateway | NAT Gateway | ?? |
-| servicegateway | Service Gateway | ?? |
-| public-route-table | Routing Table | <ul><li>Network entity: Internet Gateway (0.0.0.0/0)</li></ul> |
-| private-route-table | Routing Table | <ul><li>Network entity: NAT Gateway (0.0.0.0/0)</li><li>Network entity: Service Gateway (all-sin-services-in-oracle-services-network)</li></ul> |
-| svc-subnet | Subnet | <ul><li>CIDR Block: 10.0.20.0/24</li><li>Routing Table: public-route-table</li><li>DNS Label: svcSubnetDns</li></ul> |
-| k8s-subnet | Subnet | <ul><li>CIDR Block: 10.0.0.0/28</li><li>Routing Table: public-route-table</li><li>DNS Label: k8sSubnetDns</li><li>Security List: k8s-security-list</li></ul> |
-| node-subnet | Subnet | <ul><li>CIDR Block: 10.0.10.0/24</li><li>Routing Table: private-route-table</li><li>DNS Label: nodeSubnetDns</li><li>Security List: node-security-list</li></ul> |
-| k8s-security-list | Security List | <ul> <li> <div>Ingress Security Rules</div><ol> <li> <ul> <li>Protocol: ICMP</li><li>Source: 10.0.10.0/24</li><li>Description: Path discovery</li><li>Type, Code: 3, 4</li></ul> </li><li> <ul> <li>Protocol: TCP</li><li>Source: 0.0.0.0/0</li><li>Description: External access to Kubernetes API endpoint</li><li>Destination Port Range: 6443</li></ul> </li><li> <ul> <li>Protocol: TCP</li><li>Source: 10.0.10.0/24</li><li>Description: Kubernetes worker to Kubernetes API endpoint communication</li><li>Destination Port Range: 6443</li></ul> </li><li> <ul> <li>Protocol: TCP</li><li>Source: 10.0.10.0/24</li><li>Description: Kubernetes worker to control plane communication</li><li>Destination Port Range: 12250</li></ul> </li></ol> </li><li> <div>Egress Security Rules</div><ol> <li> <ul> <li>Protocol: TCP</li><li>Destination: all-sin-services-in-oracle-services-network</li><li>Destination Type: Service CIDR Block</li><li>Destination Port Range: 443</li><li>Description: Allow Kubernetes Control Plane to communicate with OKE</li></ul> </li><li> <ul> <li>Protocol: TCP</li><li>Destination: 10.0.10.0/24</li><li>Destination Type: CIDR Block</li><li>Description: All traffic to worker nodes</li></ul> </li><li> <ul> <li>Protocol: ICMP</li><li>Destination: 10.0.10.0/24</li><li>Destination Type: CIDR Block</li><li>Description: Path discovery</li><li>Type, Code: 3, 4</li></ul> </li></ol> </li></ul> |
-| node-security-list | Security List | <ul> <li> <div>Ingress Security Rules</div><ol> <li> <ul> <li>Protocol: ICMP</li><li>Source: 10.0.10.0/24</li><li>Description: Allow pods on one worker node to communicate with pods on other worker nodes</li></ul> </li><li> <ul> <li>Protocol: ICMP</li><li>Source: 10.0.0.0/28</li><li>Description: Path discovery</li><li>Type, Code: 3, 4</li></ul> </li><li> <ul> <li>Protocol: TCP</li><li>Source: 10.0.0.0/28</li><li>Description: TCP access from Kubernetes Control Plane</li></ul> </li><li> <ul> <li>Protocol: TCP</li><li>Source: 0.0.0.0/0</li><li>Description: Inbound SSH traffic to worker nodes</li><li>Destination Port Range: 22</li></ul> </li></ol> </li><li> <div>Egress Security Rules</div><ol> <li> <ul> <li>Protocol: "all"</li><li>Destination: 10.0.10.0/24</li><li>Description: Allow pods on one worker node to communicate with pods on other worker nodes</li></ul> </li><li> <ul> <li>Protocol: TCP</li><li>Destination: 10.0.0.0/28</li><li>Destination Port Range: 6443</li><li>Description: Access to Kubernetes API Endpoint</li></ul> </li><li> <ul> <li>Protocol: TCP</li><li>Destination: 10.0.0.0/28</li><li>Destination Port Range: 12250</li><li>Description: Kubernetes worker to control plane communication</li></ul> </li><li> <ul> <li>Protocol: ICMP</li><li>Destination: 10.0.0.0/28</li><li>Description: Path discovery</li><li>Type, Code: 3, 4</li></ul> </li><li> <ul> <li>Protocol: TCP</li><li>Destination: all-sin-services-in-oracle-services-network</li><li>Destination Port Range: 443</li><li>Destination Type: Service CIDR Block</li><li>Description: Allow nodes to communicate with OKE to ensure correct start-up and continued functioning</li></ul> </li><li> <ul> <li>Protocol: ICMP</li><li>Destination: 0.0.0.0/0</li><li>Description: ICMP Access from Kubernetes Control Plane</li><li>Type, Code: 3, 4</li></ul> </li><li> <ul> <li>Protocol: "all"</li><li>Destination: 0.0.0.0/0</li><li>Description: Worker Nodes access to Internet</li></ul> </li></ol> </li></ul> |
+| [internetgateway](#2-create-internet-gateway) | Internet Gateway | CIDR Block: 0.0.0.0/0 |
+| [natgateway](#3-create-nat-gateway) | NAT Gateway | CIDR Block: 0.0.0.0/0 |
+| [servicegateway](#4-create-service-gateway) | Service Gateway | - |
+| [public-route-table](#6-create-public-route-table) | Routing Table | <ul><li>Network entity: Internet Gateway (0.0.0.0/0)</li></ul> |
+| [private-route-table](#5-create-private-route-table) | Routing Table | <ul><li>Network entity: NAT Gateway (0.0.0.0/0)</li><li>Network entity: Service Gateway (all-sin-services-in-oracle-services-network)</li></ul> |
+| [svc-subnet](#9-create-subnets) | Subnet | <ul><li>CIDR Block: 10.0.20.0/24</li><li>Routing Table: public-route-table</li><li>DNS Label: svcSubnetDns</li></ul> |
+| [k8s-subnet](#9-create-subnets) | Subnet | <ul><li>CIDR Block: 10.0.0.0/28</li><li>Routing Table: public-route-table</li><li>DNS Label: k8sSubnetDns</li><li>Security List: k8s-security-list</li></ul> |
+| [node-subnet](#9-create-subnets) | Subnet | <ul><li>CIDR Block: 10.0.10.0/24</li><li>Routing Table: private-route-table</li><li>DNS Label: nodeSubnetDns</li><li>Security List: node-security-list</li></ul> |
+| [k8s-security-list](#7-create-k8s-security-list) | Security List | <ul> <li> <div>Ingress Security Rules</div><ol> <li> <ul> <li>Protocol: ICMP</li><li>Source: 10.0.10.0/24</li><li>Description: Path discovery</li><li>Type, Code: 3, 4</li></ul> </li><li> <ul> <li>Protocol: TCP</li><li>Source: 0.0.0.0/0</li><li>Description: External access to Kubernetes API endpoint</li><li>Destination Port Range: 6443</li></ul> </li><li> <ul> <li>Protocol: TCP</li><li>Source: 10.0.10.0/24</li><li>Description: Kubernetes worker to Kubernetes API endpoint communication</li><li>Destination Port Range: 6443</li></ul> </li><li> <ul> <li>Protocol: TCP</li><li>Source: 10.0.10.0/24</li><li>Description: Kubernetes worker to control plane communication</li><li>Destination Port Range: 12250</li></ul> </li></ol> </li><li> <div>Egress Security Rules</div><ol> <li> <ul> <li>Protocol: TCP</li><li>Destination: all-sin-services-in-oracle-services-network</li><li>Destination Type: Service CIDR Block</li><li>Destination Port Range: 443</li><li>Description: Allow Kubernetes Control Plane to communicate with OKE</li></ul> </li><li> <ul> <li>Protocol: TCP</li><li>Destination: 10.0.10.0/24</li><li>Destination Type: CIDR Block</li><li>Description: All traffic to worker nodes</li></ul> </li><li> <ul> <li>Protocol: ICMP</li><li>Destination: 10.0.10.0/24</li><li>Destination Type: CIDR Block</li><li>Description: Path discovery</li><li>Type, Code: 3, 4</li></ul> </li></ol> </li></ul> |
+| [node-security-list](#8-create-node-security-list) | Security List | <ul> <li> <div>Ingress Security Rules</div><ol> <li> <ul> <li>Protocol: ICMP</li><li>Source: 10.0.10.0/24</li><li>Description: Allow pods on one worker node to communicate with pods on other worker nodes</li></ul> </li><li> <ul> <li>Protocol: ICMP</li><li>Source: 10.0.0.0/28</li><li>Description: Path discovery</li><li>Type, Code: 3, 4</li></ul> </li><li> <ul> <li>Protocol: TCP</li><li>Source: 10.0.0.0/28</li><li>Description: TCP access from Kubernetes Control Plane</li></ul> </li><li> <ul> <li>Protocol: TCP</li><li>Source: 0.0.0.0/0</li><li>Description: Inbound SSH traffic to worker nodes</li><li>Destination Port Range: 22</li></ul> </li></ol> </li><li> <div>Egress Security Rules</div><ol> <li> <ul> <li>Protocol: "all"</li><li>Destination: 10.0.10.0/24</li><li>Description: Allow pods on one worker node to communicate with pods on other worker nodes</li></ul> </li><li> <ul> <li>Protocol: TCP</li><li>Destination: 10.0.0.0/28</li><li>Destination Port Range: 6443</li><li>Description: Access to Kubernetes API Endpoint</li></ul> </li><li> <ul> <li>Protocol: TCP</li><li>Destination: 10.0.0.0/28</li><li>Destination Port Range: 12250</li><li>Description: Kubernetes worker to control plane communication</li></ul> </li><li> <ul> <li>Protocol: ICMP</li><li>Destination: 10.0.0.0/28</li><li>Description: Path discovery</li><li>Type, Code: 3, 4</li></ul> </li><li> <ul> <li>Protocol: TCP</li><li>Destination: all-sin-services-in-oracle-services-network</li><li>Destination Port Range: 443</li><li>Destination Type: Service CIDR Block</li><li>Description: Allow nodes to communicate with OKE to ensure correct start-up and continued functioning</li></ul> </li><li> <ul> <li>Protocol: ICMP</li><li>Destination: 0.0.0.0/0</li><li>Description: ICMP Access from Kubernetes Control Plane</li><li>Type, Code: 3, 4</li></ul> </li><li> <ul> <li>Protocol: "all"</li><li>Destination: 0.0.0.0/0</li><li>Description: Worker Nodes access to Internet</li></ul> </li></ol> </li></ul> |
 
 
 ## Steps
@@ -524,6 +558,49 @@ func MigrateToVcnNativeCluster(clusterId, k8sSubnetId string) containerengine.Cl
 ```
 
 
+### 12. Create Node Pool
+```go
+func CreateNodePool(nodePoolName, kubernetesVersion, clusterId, imageId, compartmentId string, subnet core.Subnet, ads identity.ListAvailabilityDomainsResponse) {
+	log.Println("CREATE NODE POOL ", nodePoolName)
+	size := len(ads.Items)
+	createNodePoolRequest := containerengine.CreateNodePoolRequest{
+		CreateNodePoolDetails: containerengine.CreateNodePoolDetails{
+			CompartmentId:     &compartmentId,
+			ClusterId:         &clusterId,
+			Name:              &nodePoolName,
+			KubernetesVersion: &kubernetesVersion,
+			NodeShape:         common.String("VM.Standard.E3.Flex"),
+			NodeShapeConfig: &containerengine.CreateNodeShapeConfigDetails{
+				Ocpus: common.Float32(4),
+			},
+			NodeConfigDetails: &containerengine.CreateNodePoolNodeConfigDetails{
+				Size:             &size,
+				PlacementConfigs: make([]containerengine.NodePoolPlacementConfigDetails, 0, size),
+			},
+			InitialNodeLabels: []containerengine.KeyValue{{Key: common.String("name"), Value: common.String(nodePoolName)}},
+			NodeSourceDetails: containerengine.NodeSourceViaImageDetails{ImageId: common.String(imageId)},
+		},
+	}
+
+	for i := 0; i < len(ads.Items); i++ {
+		createNodePoolRequest.NodeConfigDetails.PlacementConfigs = append(createNodePoolRequest.NodeConfigDetails.PlacementConfigs, containerengine.NodePoolPlacementConfigDetails{
+			AvailabilityDomain: ads.Items[i].Name,
+			SubnetId:           subnet.Id,
+		})
+	}
+
+	c, clerr := containerengine.NewContainerEngineClientWithConfigurationProvider(common.DefaultConfigProvider())
+	helpers.FatalIfError(clerr)
+
+	ctx := context.Background()
+	createNodePoolResponse, err := c.CreateNodePool(ctx, createNodePoolRequest)
+	helpers.FatalIfError(err)
+	fmt.Println("creating nodepool")
+
+	waitUntilWorkRequestComplete(c, createNodePoolResponse.OpcWorkRequestId)
+	fmt.Println("nodepool created")
+}
+```
 
 
 
